@@ -64,6 +64,7 @@ ERROR(const char *s)
     char *msg = strerror(errno);
     LOGE("%s: %s", s, msg);
 }
+
 #endif
 
 int use_tty = 1;
@@ -245,7 +246,8 @@ ss_align(size_t size)
     int err;
     void *tmp = NULL;
 #ifdef HAVE_POSIX_MEMALIGN
-    err = posix_memalign(&tmp, sizeof(void *), size);
+    /* ensure 16 byte alignment */
+    err = posix_memalign(&tmp, 16, size);
 #else
     err = -1;
 #endif
@@ -266,6 +268,12 @@ ss_realloc(void *ptr, size_t new_size)
         exit(EXIT_FAILURE);
     }
     return new;
+}
+
+int
+ss_is_ipv6addr(const char *addr)
+{
+    return strcmp(addr, ":") > 0;
 }
 
 void
@@ -317,7 +325,7 @@ usage()
     printf(
         "                                  salsa20, chacha20 and chacha20-ietf.\n");
     printf(
-        "                                  The default cipher is rc4-md5.\n");
+        "                                  The default cipher is chacha20-ietf-poly1305.\n");
     printf("\n");
     printf(
         "       [-a <user>]                Run as another user.\n");
@@ -492,17 +500,28 @@ get_default_conf(void)
 {
 #ifndef __MINGW32__
     static char sysconf[] = "/etc/shadowsocks-libev/config.json";
-    static char userconf[PATH_MAX] = { 0 };
+    static char *userconf = NULL;
+    static int buf_size   = 0;
     char *conf_home;
 
     conf_home = getenv("XDG_CONFIG_HOME");
 
+    // Memory of userconf only gets allocated once, and will not be
+    // freed. It is used as static buffer.
     if (!conf_home) {
-        strcpy(userconf, getenv("HOME"));
-        strcat(userconf, "/.config/shadowsocks-libev/config.json");
+        if (buf_size == 0) {
+            buf_size = 50 + strlen(getenv("HOME"));
+            userconf = malloc(buf_size);
+        }
+        snprintf(userconf, buf_size, "%s%s", getenv("HOME"),
+                 "/.config/shadowsocks-libev/config.json");
     } else {
-        strcpy(userconf, conf_home);
-        strcat(userconf, "/shadowsocks-libev/config.json");
+        if (buf_size == 0) {
+            buf_size = 50 + strlen(conf_home);
+            userconf = malloc(buf_size);
+        }
+        snprintf(userconf, buf_size, "%s%s", conf_home,
+                 "/shadowsocks-libev/config.json");
     }
 
     // Check if the user-specific config exists.
